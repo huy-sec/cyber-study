@@ -1,0 +1,63 @@
+name: Deploy to Azure Static Web Apps
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - main
+
+jobs:
+  # ── Build + Deploy ──────────────────────────────────────────────────────────
+  build_and_deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    # Skip deploy on closed PRs that weren't merged
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        # Supabase credentials are injected here from GitHub Secrets.
+        # They become VITE_ env vars during the Vite build and are
+        # baked into the static bundle — never exposed in the repo.
+        env:
+          VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token:                       ${{ secrets.GITHUB_TOKEN }}
+          action:                           upload
+          app_location:                     '/'       # repo root
+          output_location:                  'dist'    # Vite build output
+          skip_app_build:                   true      # we built above
+
+  # ── Close PR environment ────────────────────────────────────────────────────
+  close_pull_request:
+    name: Close Pull Request Environment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+
+    steps:
+      - name: Close staging environment
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action:                          close
